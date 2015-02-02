@@ -15,7 +15,9 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import json
+from contextlib import suppress
 from django.apps import apps
+from django.core.exceptions import ObjectDoesNotExist
 from rest_framework import serializers
 
 from taiga.base.serializers import Serializer, TagsField, NeighborsSerializerMixin, PgArrayField
@@ -27,20 +29,10 @@ from taiga.projects.notifications.validators import WatchersValidator
 from . import models
 
 
-class RolePointsField(serializers.WritableField):
-    def to_native(self, obj):
-        return {str(o.role.id): o.points.id for o in obj.all()}
-
-    def from_native(self, obj):
-        if isinstance(obj, dict):
-            return obj
-        return json.loads(obj)
-
-
 class UserStorySerializer(WatchersValidator, serializers.ModelSerializer):
     tags = TagsField(default=[], required=False)
     external_reference = PgArrayField(required=False)
-    points = RolePointsField(source="role_points", required=False)
+    points = serializers.SerializerMethodField("get_points")
     total_points = serializers.SerializerMethodField("get_total_points")
     comment = serializers.SerializerMethodField("get_comment")
     milestone_slug = serializers.SerializerMethodField("get_milestone_slug")
@@ -53,6 +45,26 @@ class UserStorySerializer(WatchersValidator, serializers.ModelSerializer):
         model = models.UserStory
         depth = 0
         read_only_fields = ('created_date', 'modified_date')
+
+    def save_object(self, obj, **kwargs):
+        # This is very ugly hack, but having
+        # restframework is the only way to do it.
+
+        role_points_dict = obj._related_data.pop("role_points", {})
+
+        super().save_object(obj, **kwargs)
+
+        if role_points_dict:
+            points_modelcls = apps.get_model("projects", "Points")
+            with suppress(ObjectDoesNotExist):
+                for role_id, points_id in role_points_dict.items():
+                    role_points = obj.role_points.get(role__id=role_id)
+                    role_points.points = points_modelcls.objects.get(id=points_id,
+                                                                     project=obj.project)
+                    role_points.save()
+
+    def get_points(self, obj):
+        return {str(o.role.id): o.points.id for o in obj.role_points.all()}
 
     def get_total_points(self, obj):
         return obj.get_total_points()
@@ -90,7 +102,6 @@ class UserStorySerializer(WatchersValidator, serializers.ModelSerializer):
 
 
 class UserStoryNeighborsSerializer(NeighborsSerializerMixin, UserStorySerializer):
-
     def serialize_neighbor(self, neighbor):
         return NeighborUserStorySerializer(neighbor).data
 
@@ -102,8 +113,7 @@ class NeighborUserStorySerializer(serializers.ModelSerializer):
         depth = 0
 
 
-class UserStoriesBulkSerializer(ProjectExistsValidator, UserStoryStatusExistsValidator,
-                                Serializer):
+class UserStoriesBulkSerializer(ProjectExistsValidator, UserStoryStatusExistsValidator, Serializer):
     project_id = serializers.IntegerField()
     status_id = serializers.IntegerField(required=False)
     bulk_stories = serializers.CharField()
@@ -116,8 +126,6 @@ class _UserStoryOrderBulkSerializer(UserStoryExistsValidator, Serializer):
     order = serializers.IntegerField()
 
 
-class UpdateUserStoriesOrderBulkSerializer(ProjectExistsValidator,
-                                                 UserStoryStatusExistsValidator,
-                                                 Serializer):
+class UpdateUserStoriesOrderBulkSerializer(ProjectExistsValidator, UserStoryStatusExistsValidator, Serializer):
     project_id = serializers.IntegerField()
     bulk_stories = _UserStoryOrderBulkSerializer(many=True)
