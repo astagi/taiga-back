@@ -253,6 +253,40 @@ def test_list_contacts_public_projects(client):
     assert response_content[0]["id"] == user_2.id
 
 
+def test_mail_permissions(client):
+
+    user_1 = f.UserFactory.create(is_superuser=True)
+    user_2 = f.UserFactory.create()
+
+    client.login(user_1)
+
+    url = reverse('users-detail', kwargs={"pk": user_1.pk})
+    response = client.get(url, content_type="application/json")
+    assert response.status_code == 200
+    response_content = response.data
+    assert "email" in response_content
+
+    url = reverse('users-detail', kwargs={"pk": user_2.pk})
+    response = client.get(url, content_type="application/json")
+    assert response.status_code == 200
+    response_content = response.data
+    assert "email" in response_content
+
+    client.login(user_2)
+
+    url = reverse('users-detail', kwargs={"pk": user_1.pk})
+    response = client.get(url, content_type="application/json")
+    assert response.status_code == 200
+    response_content = response.data
+    assert "email" not in response_content
+
+    url = reverse('users-detail', kwargs={"pk": user_2.pk})
+    response = client.get(url, content_type="application/json")
+    assert response.status_code == 200
+    response_content = response.data
+    assert "email" in response_content
+
+
 def test_get_favourites_list():
     fav_user = f.UserFactory()
     viewer_user = f.UserFactory()
