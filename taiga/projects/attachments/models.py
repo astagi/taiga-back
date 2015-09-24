@@ -105,7 +105,8 @@ class Attachment(models.Model):
                 self._generate_sha1()
         save = super().save(*args, **kwargs)
         self._orig_attached_file = self.attached_file
-        self.attached_file.file.close()
+        if self.attached_file:
+            self.attached_file.file.close()
         return save
 
     def __str__(self):
